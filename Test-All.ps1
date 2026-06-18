@@ -24,9 +24,18 @@ function Invoke-CheckedCommand {
 
     Push-Location $WorkingDirectory
     try {
-        & $FilePath @ArgumentList
-        if ($LASTEXITCODE -ne 0) {
-            throw "Command failed with exit code $LASTEXITCODE`: $FilePath $($ArgumentList -join ' ')"
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $FilePath @ArgumentList
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+
+        if ($exitCode -ne 0) {
+            throw "Command failed with exit code $exitCode`: $FilePath $($ArgumentList -join ' ')"
         }
     }
     finally {

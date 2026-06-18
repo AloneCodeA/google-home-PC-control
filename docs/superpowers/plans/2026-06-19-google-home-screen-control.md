@@ -61,11 +61,11 @@
 
 ## 階段六：本機部署驗收
 
-- [ ] 以系統管理員權限執行正式安裝。
-- [ ] 驗證 `Ethernet` IPv6、Private profile 與防火牆規則。
-- [ ] 驗證登入排程、Matterbridge 外掛與本機 frontend。
-- [ ] 執行五秒顯示器實機 self-test。
-- [ ] 完成一次性 Google Home Matter commissioning。
+- [x] 以系統管理員權限執行正式安裝。
+- [x] 驗證 `Ethernet` IPv6、Private profile 與防火牆規則。
+- [x] 驗證登入排程、Matterbridge 外掛與本機 frontend。
+- [x] 執行五秒顯示器實機 self-test。
+- [x] 完成一次性 Google Home Matter commissioning。
 - [ ] 實測 Home Mini Off/On 語音命令。
 
 ## 驗收證據

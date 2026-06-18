@@ -14,9 +14,13 @@ Describe 'Install.ps1 validation' {
         $report.DotNet8RuntimeAvailable | Should Be $true
         $report.AdapterFound | Should Be $true
         $report.AdapterUp | Should Be $true
+        $report.InterfaceMatchesSavedState | Should Be $true
         ($report.PlannedActions -contains 'Enable IPv6 on Ethernet') | Should Be $true
         ($report.PlannedActions -contains 'Set Ethernet network category to Private') | Should Be $true
         ($report.PlannedActions -contains 'Build and install the Matterbridge plugin package') | Should Be $true
         ($report.PlannedActions -contains 'Create the Matterbridge logon scheduled task') | Should Be $true
+
+        $scriptText = Get-Content -LiteralPath $installScript -Raw
+        $scriptText | Should Match "'--fixed_delay'\s*'1'"
     }
 }

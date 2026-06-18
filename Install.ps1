@@ -45,9 +45,18 @@ function Invoke-CheckedCommand {
 
     Push-Location $WorkingDirectory
     try {
-        & $FilePath @ArgumentList
-        if ($LASTEXITCODE -ne 0) {
-            throw "Command failed with exit code $LASTEXITCODE`: $FilePath $($ArgumentList -join ' ')"
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $FilePath @ArgumentList
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+
+        if ($exitCode -ne 0) {
+            throw "Command failed with exit code $exitCode`: $FilePath $($ArgumentList -join ' ')"
         }
     }
     finally {
@@ -62,6 +71,12 @@ function Get-ValidationReport {
     $adapter = Get-NetAdapter -Name $InterfaceAlias -ErrorAction SilentlyContinue
     $profile = Get-NetConnectionProfile -InterfaceAlias $InterfaceAlias -ErrorAction SilentlyContinue
     $ipv6Binding = Get-NetAdapterBinding -Name $InterfaceAlias -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+    $savedState = if (Test-Path -LiteralPath $StatePath) {
+        Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
+    }
+    else {
+        $null
+    }
 
     return [ordered]@{
         InterfaceAlias = $InterfaceAlias
@@ -74,6 +89,8 @@ function Get-ValidationReport {
         AdapterUp = $null -ne $adapter -and $adapter.Status -eq 'Up'
         CurrentIpv6Enabled = $null -ne $ipv6Binding -and $ipv6Binding.Enabled
         CurrentNetworkCategory = if ($null -ne $profile) { [string]$profile.NetworkCategory } else { $null }
+        SavedInterfaceAlias = if ($null -ne $savedState) { [string]$savedState.InterfaceAlias } else { $null }
+        InterfaceMatchesSavedState = $null -eq $savedState -or $savedState.InterfaceAlias -eq $InterfaceAlias
         IsAdministrator = Test-IsAdministrator
         PlannedActions = @(
             "Enable IPv6 on $InterfaceAlias"
@@ -100,6 +117,9 @@ if (-not $report.NodeVersionSupported) { $failedChecks += 'Node.js 24.x is requi
 if (-not $report.DotNet8RuntimeAvailable) { $failedChecks += '.NET 8 runtime is required.' }
 if (-not $report.AdapterFound) { $failedChecks += "Network adapter '$InterfaceAlias' was not found." }
 if (-not $report.AdapterUp) { $failedChecks += "Network adapter '$InterfaceAlias' is not up." }
+if (-not $report.InterfaceMatchesSavedState) {
+    $failedChecks += "The saved installation uses '$($report.SavedInterfaceAlias)', not '$InterfaceAlias'. Uninstall before changing adapters."
+}
 if (-not $report.IsAdministrator) { $failedChecks += 'Run Install.ps1 from an elevated PowerShell window.' }
 if ($failedChecks.Count -gt 0) {
     throw ($failedChecks -join [Environment]::NewLine)
@@ -152,6 +172,26 @@ Invoke-CheckedCommand -FilePath 'dotnet' -ArgumentList @(
     '--output', (Join-Path $PluginRoot 'bin')
 )
 
+$existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($null -ne $existingTask) {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $stopDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        $runningMatterbridge = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'node.exe' -and
+            $_.CommandLine -like '*node_modules\matterbridge\bin\matterbridge.js*'
+        })
+        if ($runningMatterbridge.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $stopDeadline)
+
+    if ($runningMatterbridge.Count -gt 0) {
+        throw 'The existing Matterbridge process did not stop within 15 seconds.'
+    }
+}
+
 Invoke-CheckedCommand -FilePath 'npm.cmd' -ArgumentList @(
     'install', '--global', "matterbridge@$MatterbridgeVersion", '--omit=dev', '--no-fund', '--no-audit'
 )
@@ -195,7 +235,7 @@ $taskArguments = @(
     '--bind'
     '127.0.0.1'
     '--fixed_delay'
-    '0'
+    '1'
     '--filelogger'
     '--no-ansi'
 ) -join ' '

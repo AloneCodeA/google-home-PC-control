@@ -52,6 +52,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
 7. 建立目前使用者登入後自動啟動的排程工作。
 8. 將螢幕關閉五秒再恢復，確認實際顯示控制可用。
 
+重複執行安裝時，腳本會先停止既有 Matterbridge 程序，再替換全域套件並重新啟動排程；第一次保存的網路設定不會被後續執行覆寫。若要更換網路介面，必須先解除安裝並復原原介面。
+
 只檢查而不修改系統：
 
 ```powershell

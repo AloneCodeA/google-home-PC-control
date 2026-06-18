@@ -87,6 +87,23 @@ if (-not $PSCmdlet.ShouldProcess($env:COMPUTERNAME, 'Uninstall Google Home Scree
 $scheduledTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -ne $scheduledTask) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+
+    $stopDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        $runningMatterbridge = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'node.exe' -and
+            $_.CommandLine -like '*node_modules\matterbridge\bin\matterbridge.js*'
+        })
+        if ($runningMatterbridge.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $stopDeadline)
+
+    if ($runningMatterbridge.Count -gt 0) {
+        throw 'Matterbridge did not stop within 15 seconds.'
+    }
+
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
