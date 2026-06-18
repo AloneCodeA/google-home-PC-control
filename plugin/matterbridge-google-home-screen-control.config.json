@@ -1,0 +1,9 @@
+{
+  "name": "matterbridge-google-home-screen-control",
+  "type": "DynamicPlatform",
+  "version": "1.0.0",
+  "debug": false,
+  "unregisterOnShutdown": false,
+  "deviceName": "Computer Screen",
+  "hostExecutable": "bin/ScreenControl.Host.exe"
+}

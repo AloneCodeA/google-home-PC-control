@@ -1,0 +1,58 @@
+{
+  "title": "Google Home Screen Control",
+  "description": "Expose all Windows displays as one local Matter on/off device.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "readOnly": true,
+      "ui:widget": "hidden"
+    },
+    "type": {
+      "type": "string",
+      "const": "DynamicPlatform",
+      "readOnly": true,
+      "ui:widget": "hidden"
+    },
+    "version": {
+      "type": "string",
+      "readOnly": true,
+      "ui:widget": "hidden"
+    },
+    "debug": {
+      "title": "Enable debug logging",
+      "type": "boolean",
+      "default": false
+    },
+    "unregisterOnShutdown": {
+      "title": "Unregister device on shutdown",
+      "description": "Development only. Keep disabled to preserve Matter commissioning.",
+      "type": "boolean",
+      "default": false
+    },
+    "deviceName": {
+      "title": "Google Home device name",
+      "description": "Use Computer Screen for the documented English voice commands.",
+      "type": "string",
+      "minLength": 1,
+      "default": "Computer Screen"
+    },
+    "hostExecutable": {
+      "title": "Windows host executable",
+      "description": "Path relative to the installed plugin directory.",
+      "type": "string",
+      "minLength": 1,
+      "default": "bin/ScreenControl.Host.exe"
+    }
+  },
+  "required": [
+    "name",
+    "type",
+    "version",
+    "debug",
+    "unregisterOnShutdown",
+    "deviceName",
+    "hostExecutable"
+  ]
+}
