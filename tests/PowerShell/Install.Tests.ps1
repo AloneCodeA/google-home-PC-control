@@ -21,6 +21,15 @@ Describe 'Install.ps1 validation' {
         ($report.PlannedActions -contains 'Create the Matterbridge logon scheduled task') | Should Be $true
 
         $scriptText = Get-Content -LiteralPath $installScript -Raw
-        $scriptText | Should Match "'--fixed_delay'\s*'1'"
+        $scriptText | Should Match 'Start-Matterbridge\.ps1'
+        $scriptText | Should Match "'-WindowStyle'\s*'Hidden'"
+        $scriptText | Should Not Match 'WScript\.Shell'
+        $scriptText | Should Match '-RunOnlyIfNetworkAvailable'
+        $scriptText | Should Match "Delay\s*=\s*'PT5S'"
+        $scriptText | Should Match 'automaticStartDeadline'
+        $scriptText.Contains("if (`$registeredTask.State -ne 'Running')") | Should Be $true
+
+        $launcherText = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Start-Matterbridge.ps1') -Raw
+        $launcherText | Should Match "'--fixed_delay'\s*'1'"
     }
 }

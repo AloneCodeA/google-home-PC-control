@@ -24,6 +24,9 @@ $PluginRoot = Join-Path $RepositoryRoot 'plugin'
 $ArtifactsRoot = Join-Path $RepositoryRoot 'artifacts'
 $StateRoot = Join-Path $env:LOCALAPPDATA 'GoogleHomeScreenControl'
 $StatePath = Join-Path $StateRoot 'install-state.json'
+$LauncherSourcePath = Join-Path $RepositoryRoot 'Start-Matterbridge.ps1'
+$LauncherInstallPath = Join-Path $StateRoot 'Start-Matterbridge.ps1'
+$LegacyLauncherHostPath = Join-Path $StateRoot 'Start-Matterbridge.vbs'
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -98,6 +101,7 @@ function Get-ValidationReport {
             'Create Private/LocalSubnet mDNS and Matter firewall rules'
             'Build and install the Matterbridge plugin package'
             'Register and enable the Computer Screen plugin'
+            'Install the network-aware Matterbridge launcher'
             'Create the Matterbridge logon scheduled task'
             'Start Matterbridge for the current interactive user'
             'Run the five-second display self-test'
@@ -224,32 +228,54 @@ $matterbridgeScript = Join-Path (Split-Path $matterbridgeCommand -Parent) 'node_
 if (-not (Test-Path -LiteralPath $matterbridgeScript)) {
     throw "Matterbridge entry point was not found: $matterbridgeScript"
 }
+if (-not (Test-Path -LiteralPath $LauncherSourcePath)) {
+    throw "Matterbridge launcher was not found: $LauncherSourcePath"
+}
+Copy-Item -LiteralPath $LauncherSourcePath -Destination $LauncherInstallPath -Force
+Remove-Item -LiteralPath $LegacyLauncherHostPath -Force -ErrorAction SilentlyContinue
 
 $taskArguments = @(
-    "`"$matterbridgeScript`""
-    '--nosudo'
-    '--mdnsinterface'
+    '-NoProfile'
+    '-NonInteractive'
+    '-WindowStyle'
+    'Hidden'
+    '-ExecutionPolicy'
+    'Bypass'
+    '-File'
+    "`"$LauncherInstallPath`""
+    '-InterfaceAlias'
     "`"$InterfaceAlias`""
-    '--frontend'
-    '8283'
-    '--bind'
-    '127.0.0.1'
-    '--fixed_delay'
-    '1'
-    '--filelogger'
-    '--no-ansi'
+    '-NodeExecutable'
+    "`"$nodeExecutable`""
+    '-MatterbridgeScript'
+    "`"$matterbridgeScript`""
 ) -join ' '
-$taskAction = New-ScheduledTaskAction -Execute $nodeExecutable -Argument $taskArguments -WorkingDirectory $HOME
+$powerShellExecutable = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$taskAction = New-ScheduledTaskAction -Execute $powerShellExecutable `
+    -Argument $taskArguments -WorkingDirectory $StateRoot
 $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-$taskTrigger.Delay = 'PT30S'
+$taskTrigger.Delay = 'PT5S'
 $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+    -StartWhenAvailable -RunOnlyIfNetworkAvailable `
+    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit ([TimeSpan]::Zero)
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
     -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger `
     -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
-Start-ScheduledTask -TaskName $TaskName
+$automaticStartDeadline = [DateTime]::UtcNow.AddSeconds(10)
+do {
+    $registeredTask = Get-ScheduledTask -TaskName $TaskName
+    if ($registeredTask.State -eq 'Running') {
+        break
+    }
+
+    Start-Sleep -Milliseconds 250
+} while ([DateTime]::UtcNow -lt $automaticStartDeadline)
+
+if ($registeredTask.State -ne 'Running') {
+    Start-ScheduledTask -TaskName $TaskName
+}
 
 if (-not $SkipSelfTest) {
     $hostExecutable = Join-Path $PluginRoot 'bin\ScreenControl.Host.exe'
@@ -263,5 +289,6 @@ if (-not $SkipSelfTest) {
     TaskName = $TaskName
     FrontendUrl = 'http://127.0.0.1:8283/'
     StatePath = $StatePath
+    LauncherPath = $LauncherInstallPath
     PackagePath = $packagePath
 } | ConvertTo-Json -Depth 5

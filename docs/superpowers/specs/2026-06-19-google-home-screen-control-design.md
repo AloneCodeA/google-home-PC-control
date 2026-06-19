@@ -117,19 +117,21 @@ message-only window 註冊 `GUID_CONSOLE_DISPLAY_STATE`：
 ## 生命週期
 
 1. 使用者登入。
-2. Windows 排程工作等待 30 秒。
-3. Matterbridge 啟動並載入外掛。
-4. 外掛啟動 Windows 主機。
-5. Windows 主機取得 system-required wake lock。
-6. 關機、登出或工作停止時，主機釋放 wake lock。
+2. Windows 排程工作等待 5 秒，且要求網路可用。
+3. 本機啟動器輪詢指定介面，直到介面 Up、IPv6 啟用且有 Preferred IPv6 位址。
+4. 啟動器刪除 `sessions.resumptionRecords` 與 `root.subscriptions.subscriptions`；fabric 與 operational credentials 保留。
+5. 啟動器建立 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Windows Job Object，並將 Node 指派進去。
+6. Matterbridge 啟動並載入外掛；其 Windows 主機子程序繼承同一個 Job Object。
+7. Windows 主機取得 system-required wake lock。
+8. 關機、登出或工作停止時，Job Object 關閉並由核心終止整棵子程序樹。
 
-排程工作在異常退出時每分鐘重試，最多 999 次。這是互動式桌面控制的必要限制；登出後沒有可控制的桌面工作階段。
+啟動器等待網路最長 120 秒，逾時會以非零代碼退出。排程工作在異常退出時每分鐘重試，最多 999 次。這是互動式桌面控制的必要限制；登出後沒有可控制的桌面工作階段。
 
 ## 測試策略
 
 - .NET：Win32 對應、狀態解析、去重、命令處理、JSONL、self-test 與真實程序協定。
 - TypeScript：傳輸、request correlation、timeout、狀態事件、單次重試、序列化及 Matter 平台生命週期。
-- PowerShell：ValidateOnly 報告、安裝/解除安裝計畫與語法。
+- PowerShell：ValidateOnly 報告、session cache 保護、網路 timeout、Job Object 子程序清理、安裝/解除安裝計畫與語法。
 - 發布：單檔 framework-dependent win-x64 EXE、TypeScript build、npm pack dry-run。
 
 ## 取捨
@@ -137,4 +139,5 @@ message-only window 註冊 `GUID_CONSOLE_DISPLAY_STATE`：
 - Matterbridge 比自行實作 Matter stack 更可維護，但固定依賴經驗證的 3.9.0 版本。
 - Windows 廣播會同時控制所有螢幕，符合需求但不支援個別裝置。
 - 登入排程不提供登出狀態控制，換取正確的互動式 Windows session ownership。
+- 啟動時捨棄 session resumption/subscription cache 會增加一次 CASE 建連成本，但避免 Windows 恢復後沿用不可達 peer；fabric 與配對不受影響。
 - 後備滑鼠輸入可能觸發極小移動，因此只在直接喚醒與 display-required 均失敗後執行，並立即移回。

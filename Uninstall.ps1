@@ -19,6 +19,9 @@ $MdnsFirewallRule = 'Google Home Screen Control - mDNS'
 $MatterFirewallRule = 'Google Home Screen Control - Matter'
 $StateRoot = Join-Path $env:LOCALAPPDATA 'GoogleHomeScreenControl'
 $StatePath = Join-Path $StateRoot 'install-state.json'
+$LauncherPath = Join-Path $StateRoot 'Start-Matterbridge.ps1'
+$LauncherHostPath = Join-Path $StateRoot 'Start-Matterbridge.vbs'
+$LauncherLogPath = Join-Path $StateRoot 'launcher.log'
 $MatterbridgeDataPath = Join-Path $HOME '.matterbridge'
 $MatterCertificatePath = Join-Path $HOME '.mattercert'
 
@@ -50,6 +53,7 @@ $plannedActions = @(
     'Stop and remove the Matterbridge logon scheduled task'
     'Disable and unregister the Computer Screen plugin'
     'Remove the Matterbridge plugin package'
+    'Remove the local Matterbridge launcher and its log'
     'Remove the dedicated firewall rules'
 )
 if ($RestoreNetwork) {
@@ -138,6 +142,9 @@ if ($PurgeMatterData) {
 }
 
 Remove-Item -LiteralPath $StatePath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $LauncherPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $LauncherHostPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $LauncherLogPath -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $StateRoot) {
     $remainingState = Get-ChildItem -LiteralPath $StateRoot -Force -ErrorAction SilentlyContinue
     if ($null -eq $remainingState) {

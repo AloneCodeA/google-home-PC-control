@@ -46,6 +46,8 @@
 - [x] 建立 Private/LocalSubnet mDNS 與 Matter 防火牆規則。
 - [x] 建置、測試、打包及全域安裝外掛。
 - [x] 建立登入排程、自動重啟與本機前端綁定。
+- [x] 啟動前等待 Ethernet/IPv6 就緒並重建 session/subscription cache。
+- [x] 使用 kill-on-close Windows Job Object 管理 Node 與 Windows Host 子程序樹。
 - [x] 啟用背景檔案日誌。
 - [x] 實作可復原且預設保留 commissioning data 的解除安裝。
 
@@ -57,7 +59,7 @@
 - [x] 通過 28 個 .NET 測試。
 - [x] 通過 16 個 TypeScript 測試。
 - [x] 通過 TypeScript typecheck/build 與 npm pack dry-run。
-- [x] 通過 2 個 PowerShell 測試與語法解析。
+- [x] 通過 5 個 PowerShell 測試與語法解析。
 
 ## 階段六：本機部署驗收
 

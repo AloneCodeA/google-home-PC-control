@@ -75,7 +75,7 @@ if ($pesterResult.FailedCount -gt 0) {
 }
 
 $syntaxErrors = @()
-foreach ($scriptName in @('Install.ps1', 'Uninstall.ps1', 'Test-All.ps1')) {
+foreach ($scriptName in @('Install.ps1', 'Uninstall.ps1', 'Start-Matterbridge.ps1', 'Test-All.ps1')) {
     $scriptPath = Join-Path $RepositoryRoot $scriptName
     $fileErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile(
