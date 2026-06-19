@@ -35,7 +35,7 @@ internal static class Program
             using var stateMonitor = new WindowsDisplayStateMonitor();
             var nativeApi = new WindowsDisplayNativeApi();
             using var wakeLock = new SystemWakeLock(nativeApi);
-            var displayController = new WindowsDisplayPowerController(nativeApi, stateMonitor, new SystemAsyncDelay());
+            var displayController = new WindowsDisplayPowerController(nativeApi, new SystemAsyncDelay());
 
             if (args.Contains("--self-test", StringComparer.Ordinal))
             {

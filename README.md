@@ -279,6 +279,72 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 `
 - Assign Node to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job and keep PowerShell waiting for its exit code, so stopping the task terminates the entire process tree.
 - Remove only restart-sensitive Matter session caches; preserve fabric and commissioning records.
 
+## Command Reliability and Hidden Window Audit
+
+### Changed
+
+- Matter command handlers now execute only the Windows action; Matterbridge's `OnOffServer` owns the command attribute transition.
+- Display-on commands always send the no-net-movement input wake fallback after the monitor-power and display-required signals.
+- A blocked synthetic-input fallback no longer changes a successful primary wake request into a failed Matter command.
+- Display-state events received during an active OnOff command update cached state without opening a competing Matter attribute transaction.
+- The launcher creates Node with `-WindowStyle Hidden` while retaining Job Object process-tree ownership.
+
+### Why
+
+- Matterbridge calls the plugin handler before `OnOffServer.on()` or `OnOffServer.off()` updates the cluster attribute. Writing the same attribute inside the handler duplicates ownership and can fail the Matter command after Windows already performed the action.
+- `GUID_CONSOLE_DISPLAY_STATE` can remain `true` after `SC_MONITORPOWER` turns a monitor off. It is not reliable evidence that the physical display is awake.
+- Windows can reject `SendInput` across an integrity or desktop boundary even after the primary monitor wake signals succeeded.
+- The Host can publish a display-state event before its correlated command result, so immediate event synchronization can contend with the command's Matter transaction.
+- `-NoNewWindow` inherits the task launcher's console. A hidden child window prevents Matterbridge output from becoming visible without detaching the process tree.
+
+### Previous Problems
+
+- Google could report "Sorry, something went wrong" even though the screen-off action had already run.
+- A stale display-state value skipped the only input-based wake fallback.
+- A blocked best-effort input fallback caused Host to return `success:false`, so Google announced a command failure after the primary wake request.
+- A display-state callback opened `setAttribute` while the OnOff command still owned the endpoint transaction, leaving Matterbridge waiting and Google timing out.
+- The interactive scheduled task could expose the Matterbridge console window.
+
+### What Was Wrong
+
+- The plugin changed an attribute that Matterbridge's OnOff behavior changes after the plugin handler returns.
+- The wake fallback depended on a power notification that did not track the monitor power command reliably.
+- The Node child inherited a console instead of being created with a hidden window.
+
+### Why It Was Bad
+
+- Split state ownership allowed command completion and the real Windows action to disagree.
+- A false-positive `true` display state made the on command report success without using its strongest fallback.
+- A visible console is disruptive and can be closed accidentally, terminating local Matter control.
+
+### Avoid Next Time
+
+- Do not update command-owned Matter attributes inside handlers when the Matterbridge behavior already performs that transition.
+- Do not use `GUID_CONSOLE_DISPLAY_STATE` as the gate for a harmless wake fallback.
+- Do not treat a blocked synthetic input fallback as failure of already successful primary wake signals.
+- Do not start an independent Matter attribute transaction from a state callback while a command transaction is active.
+- Do not use `-NoNewWindow` for an interactive background task that must remain invisible.
+
+### What To Avoid Next Time
+
+- Do not duplicate framework-owned state transitions.
+- Do not make physical wake reliability depend on a single advisory state source.
+- Do not hide a process by detaching it from Task Scheduler ownership.
+
+### Correct Direction
+
+- Keep command execution in the plugin, Matter state transitions in Matterbridge, and external Windows state synchronization in the display-state event path.
+- Use layered, idempotent wake signals with a zero-net-movement input fallback.
+- Keep injected input best-effort because UIPI and desktop isolation can reject it.
+- Suppress callback-driven attribute writes during commands and let `MatterbridgeOnOffServer` complete the command-owned state transition.
+- Keep the hidden PowerShell -> Node -> Host tree inside the kill-on-close Job Object.
+
+### Correct Approach
+
+- Let `MatterbridgeOnOffServer` update `onOff` after the host command succeeds.
+- Always execute `SendWakeInput()` after the two-second wake confirmation delay.
+- Start Node with `-WindowStyle Hidden -PassThru`, assign it to the Job Object, and wait for its exit.
+
 ## License
 
 MIT

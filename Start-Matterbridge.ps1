@@ -317,7 +317,7 @@ $killOnCloseJob = [GoogleHomeScreenControl.KillOnCloseJob]::new()
 $matterbridgeProcess = $null
 try {
     $matterbridgeProcess = Start-Process -FilePath $NodeExecutable `
-        -ArgumentList $matterbridgeArguments -NoNewWindow -PassThru
+        -ArgumentList $matterbridgeArguments -WindowStyle Hidden -PassThru
     $killOnCloseJob.Assign($matterbridgeProcess)
     $matterbridgeProcess.WaitForExit()
     $matterbridgeExitCode = $matterbridgeProcess.ExitCode

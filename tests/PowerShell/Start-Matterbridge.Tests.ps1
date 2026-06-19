@@ -1,6 +1,15 @@
 $ErrorActionPreference = 'Stop'
 
 Describe 'Start-Matterbridge.ps1 session preparation' {
+    It 'starts Matterbridge in a hidden child window without inheriting a console' {
+        $repositoryRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+        $launcherScript = Join-Path $repositoryRoot 'Start-Matterbridge.ps1'
+        $launcherText = Get-Content -LiteralPath $launcherScript -Raw
+
+        $launcherText | Should Match 'Start-Process[\s\S]*-WindowStyle Hidden[\s\S]*-PassThru'
+        $launcherText | Should Not Match '-NoNewWindow'
+    }
+
     It 'removes only restart-sensitive Matter session caches' {
         $repositoryRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
         $launcherScript = Join-Path $repositoryRoot 'Start-Matterbridge.ps1'

@@ -36,7 +36,7 @@ describe('ScreenControlPlatform', () => {
     vi.clearAllMocks();
   });
 
-  it('registers Computer Screen and updates Matter only after a successful command', async () => {
+  it('registers Computer Screen and leaves command attribute updates to Matterbridge', async () => {
     const supervisor = new RecordingSupervisor();
     const platform = new ScreenControlPlatform(
       mockMatterbridge,
@@ -64,7 +64,7 @@ describe('ScreenControlPlatform', () => {
       .mockResolvedValue(true);
     await device!.executeCommandHandler('on', {}, 'onOff', {} as never, device!);
     expect(supervisor.requestedStates).toEqual([true]);
-    expect(setAttribute).toHaveBeenCalledWith(OnOff, 'onOff', true);
+    expect(setAttribute).not.toHaveBeenCalled();
   });
 
   it('updates the Matter attribute when Windows publishes a display state', async () => {
@@ -94,6 +94,51 @@ describe('ScreenControlPlatform', () => {
     await vi.waitFor(() => {
       expect(setAttribute).toHaveBeenCalledWith(OnOff, 'onOff', false);
     });
+  });
+
+  it('does not start an attribute transaction from a display event during a command', async () => {
+    let completeCommand: (() => void) | undefined;
+    const commandGate = new Promise<void>((resolve) => {
+      completeCommand = resolve;
+    });
+    const supervisor = new RecordingSupervisor(undefined, commandGate);
+    const platform = new ScreenControlPlatform(
+      mockMatterbridge,
+      mockLog,
+      mockConfig,
+      () => supervisor,
+    );
+    // @ts-expect-error Matterbridge intentionally keeps the loader hook non-public.
+    platform.setMatterNode(
+      addBridgedEndpoint,
+      removeBridgedEndpoint,
+      removeAllBridgedEndpoints,
+      registerVirtualDevice,
+    );
+    await platform.onStart('test');
+    const device = addedDevices[0];
+    expect(device).toBeDefined();
+    const setAttribute = vi
+      .spyOn(device!, 'setAttribute')
+      .mockResolvedValue(true);
+
+    const command = device!.executeCommandHandler(
+      'off',
+      {},
+      'onOff',
+      {} as never,
+      device!,
+    );
+    await vi.waitFor(() => {
+      expect(supervisor.requestedStates).toEqual([false]);
+    });
+    supervisor.emitState(true);
+    await Promise.resolve();
+
+    expect(setAttribute).not.toHaveBeenCalled();
+
+    completeCommand?.();
+    await command;
   });
 
   it('does not update Matter when the Windows host rejects a command', async () => {
@@ -164,10 +209,14 @@ class RecordingSupervisor implements ManagedScreenHostClient {
   disposeCount = 0;
   private readonly listeners = new Set<(isOn: boolean) => void>();
 
-  constructor(private readonly commandError?: Error) {}
+  constructor(
+    private readonly commandError?: Error,
+    private readonly commandGate?: Promise<void>,
+  ) {}
 
   async setDisplayPower(isOn: boolean): Promise<void> {
     this.requestedStates.push(isOn);
+    await this.commandGate;
     if (this.commandError !== undefined) {
       throw this.commandError;
     }

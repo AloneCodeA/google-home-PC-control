@@ -54,6 +54,7 @@ export class ScreenControlPlatform extends MatterbridgeDynamicPlatform {
   private readonly unsubscribeDisplayState: () => void;
   private device: MatterbridgeEndpoint | undefined;
   private lastKnownDisplayState = true;
+  private activeCommandCount = 0;
 
   /**
    * Creates the platform and its supervised Windows host connection.
@@ -83,6 +84,9 @@ export class ScreenControlPlatform extends MatterbridgeDynamicPlatform {
     this.host = (supervisorFactory ?? (() => this.createHostSupervisor()))();
     this.unsubscribeDisplayState = this.host.onDisplayStateChanged((isOn) => {
       this.lastKnownDisplayState = isOn;
+      if (this.activeCommandCount > 0) {
+        return;
+      }
       void this.applyMatterState(isOn).catch((error: unknown) => {
         this.log.error(
           `Failed to synchronize Windows display state: ${error instanceof Error ? error.message : String(error)}`,
@@ -139,9 +143,13 @@ export class ScreenControlPlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async setDisplayPower(isOn: boolean): Promise<void> {
-    await this.host.setDisplayPower(isOn);
-    this.lastKnownDisplayState = isOn;
-    await this.applyMatterState(isOn);
+    this.activeCommandCount++;
+    try {
+      await this.host.setDisplayPower(isOn);
+      this.lastKnownDisplayState = isOn;
+    } finally {
+      this.activeCommandCount--;
+    }
   }
 
   private async applyMatterState(isOn: boolean): Promise<void> {

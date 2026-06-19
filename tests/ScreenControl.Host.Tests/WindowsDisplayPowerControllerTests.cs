@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using ScreenControl.Host.Display;
 
 namespace ScreenControl.Host.Tests;
@@ -33,9 +34,8 @@ public sealed class WindowsDisplayPowerControllerTests
     public async Task SetDisplayPowerAsync_WhenTurningOff_SendsOnlyMonitorOffCommand()
     {
         var nativeApi = new RecordingWindowsDisplayNativeApi();
-        var stateMonitor = new StubDisplayStateMonitor();
         var delay = new ImmediateAsyncDelay();
-        var controller = new WindowsDisplayPowerController(nativeApi, stateMonitor, delay);
+        var controller = new WindowsDisplayPowerController(nativeApi, delay);
 
         await controller.SetDisplayPowerAsync(false, CancellationToken.None);
 
@@ -48,9 +48,8 @@ public sealed class WindowsDisplayPowerControllerTests
     public async Task SetDisplayPowerAsync_WhenTurningOnWithoutStateConfirmation_UsesWakeInputFallback()
     {
         var nativeApi = new RecordingWindowsDisplayNativeApi();
-        var stateMonitor = new StubDisplayStateMonitor { IsDisplayOn = false };
         var delay = new ImmediateAsyncDelay();
-        var controller = new WindowsDisplayPowerController(nativeApi, stateMonitor, delay);
+        var controller = new WindowsDisplayPowerController(nativeApi, delay);
 
         await controller.SetDisplayPowerAsync(true, CancellationToken.None);
 
@@ -60,16 +59,32 @@ public sealed class WindowsDisplayPowerControllerTests
     }
 
     [Fact]
-    public async Task SetDisplayPowerAsync_WhenDisplayConfirmsOn_DoesNotSendWakeInput()
+    public async Task SetDisplayPowerAsync_WhenDisplayStateIsStaleOn_StillSendsWakeInput()
     {
         var nativeApi = new RecordingWindowsDisplayNativeApi();
-        var stateMonitor = new StubDisplayStateMonitor { IsDisplayOn = true };
         var delay = new ImmediateAsyncDelay();
-        var controller = new WindowsDisplayPowerController(nativeApi, stateMonitor, delay);
+        var controller = new WindowsDisplayPowerController(nativeApi, delay);
 
         await controller.SetDisplayPowerAsync(true, CancellationToken.None);
 
-        Assert.Equal(0, nativeApi.WakeInputCount);
+        Assert.Equal(1, nativeApi.WakeInputCount);
+    }
+
+    [Fact]
+    public async Task SetDisplayPowerAsync_WhenWakeInputIsBlocked_CompletesAfterPrimaryWakeSignals()
+    {
+        var nativeApi = new RecordingWindowsDisplayNativeApi
+        {
+            WakeInputException = new Win32Exception(5, "SendInput was blocked."),
+        };
+        var delay = new ImmediateAsyncDelay();
+        var controller = new WindowsDisplayPowerController(nativeApi, delay);
+
+        await controller.SetDisplayPowerAsync(true, CancellationToken.None);
+
+        Assert.Equal([WindowsDisplayPowerController.MonitorPowerOn], nativeApi.PowerCommands);
+        Assert.Equal(1, nativeApi.DisplayRequiredPulseCount);
+        Assert.Equal(1, nativeApi.WakeInputCount);
     }
 
     private sealed class RecordingWindowsDisplayNativeApi : IWindowsDisplayNativeApi
@@ -79,6 +94,8 @@ public sealed class WindowsDisplayPowerControllerTests
         public int DisplayRequiredPulseCount { get; private set; }
 
         public int WakeInputCount { get; private set; }
+
+        public Exception? WakeInputException { get; init; }
 
         public List<bool> SystemRequiredStates { get; } = [];
 
@@ -95,26 +112,15 @@ public sealed class WindowsDisplayPowerControllerTests
         public void SendWakeInput()
         {
             WakeInputCount++;
+            if (WakeInputException is not null)
+            {
+                throw WakeInputException;
+            }
         }
 
         public void SetSystemRequired(bool isRequired)
         {
             SystemRequiredStates.Add(isRequired);
-        }
-    }
-
-    private sealed class StubDisplayStateMonitor : IDisplayStateMonitor
-    {
-        public bool? IsDisplayOn { get; set; }
-
-        public event EventHandler<DisplayStateChangedEventArgs>? DisplayStateChanged
-        {
-            add { }
-            remove { }
-        }
-
-        public void Dispose()
-        {
         }
     }
 

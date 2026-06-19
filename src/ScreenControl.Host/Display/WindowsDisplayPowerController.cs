@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace ScreenControl.Host.Display;
 
 /// <summary>
@@ -10,16 +12,13 @@ public sealed class WindowsDisplayPowerController : IDisplayPowerController
     private static readonly TimeSpan WakeConfirmationDelay = TimeSpan.FromSeconds(2);
 
     private readonly IWindowsDisplayNativeApi _nativeApi;
-    private readonly IDisplayStateMonitor _stateMonitor;
     private readonly IAsyncDelay _delay;
 
     internal WindowsDisplayPowerController(
         IWindowsDisplayNativeApi nativeApi,
-        IDisplayStateMonitor stateMonitor,
         IAsyncDelay delay)
     {
         _nativeApi = nativeApi;
-        _stateMonitor = stateMonitor;
         _delay = delay;
     }
 
@@ -37,9 +36,13 @@ public sealed class WindowsDisplayPowerController : IDisplayPowerController
         _nativeApi.SendMonitorPowerCommand(MonitorPowerOn);
         _nativeApi.PulseDisplayRequired();
         await _delay.WaitAsync(WakeConfirmationDelay, cancellationToken).ConfigureAwait(false);
-        if (_stateMonitor.IsDisplayOn is not true)
+        try
         {
             _nativeApi.SendWakeInput();
+        }
+        catch (Win32Exception)
+        {
+            // Primary wake signals already succeeded; injected input can be blocked by UIPI.
         }
     }
 }
