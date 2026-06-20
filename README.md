@@ -7,6 +7,7 @@ OK Google, turn off Computer Screen
 OK Google, turn on  Computer Screen
 ```
 
+[![build](https://github.com/AloneCodeA/google-home-PC-control/actions/workflows/build.yml/badge.svg)](https://github.com/AloneCodeA/google-home-PC-control/actions/workflows/build.yml)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6?logo=windows11&logoColor=white)
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)
