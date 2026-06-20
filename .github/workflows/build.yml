@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  dotnet:
+    name: Build .NET solution
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore GoogleHomeScreenControl.sln
+      - name: Build (Release)
+        run: dotnet build GoogleHomeScreenControl.sln --configuration Release --no-restore
+
+  plugin:
+    name: Build Matterbridge plugin
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - name: Install dependencies
+        run: npm ci --no-fund --no-audit
+      - name: Link Matterbridge (provided globally at runtime)
+        run: |
+          npm install --global matterbridge@3.9.0 --omit=dev --no-fund --no-audit
+          npm link matterbridge --no-fund --no-audit
+      - name: Type-check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build

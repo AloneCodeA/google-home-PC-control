@@ -19,8 +19,9 @@ $MdnsFirewallRule = 'Google Home Screen Control - mDNS'
 $MatterFirewallRule = 'Google Home Screen Control - Matter'
 $StateRoot = Join-Path $env:LOCALAPPDATA 'GoogleHomeScreenControl'
 $StatePath = Join-Path $StateRoot 'install-state.json'
-$LauncherPath = Join-Path $StateRoot 'Start-Matterbridge.ps1'
-$LauncherHostPath = Join-Path $StateRoot 'Start-Matterbridge.vbs'
+$LauncherExecutablePath = Join-Path $StateRoot 'ScreenControl.Launcher.exe'
+$LauncherScriptPath = Join-Path $StateRoot 'Start-Matterbridge.ps1'
+$LegacyLauncherHostPath = Join-Path $StateRoot 'Start-Matterbridge.vbs'
 $LauncherLogPath = Join-Path $StateRoot 'launcher.log'
 $MatterbridgeDataPath = Join-Path $HOME '.matterbridge'
 $MatterCertificatePath = Join-Path $HOME '.mattercert'
@@ -94,18 +95,20 @@ if ($null -ne $scheduledTask) {
 
     $stopDeadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
-        $runningMatterbridge = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -eq 'node.exe' -and
-            $_.CommandLine -like '*node_modules\matterbridge\bin\matterbridge.js*'
+        $runningScreenControlProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'ScreenControl.Launcher.exe' -or
+            ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*Start-Matterbridge.ps1*') -or
+            ($_.Name -eq 'node.exe' -and $_.CommandLine -like '*node_modules\matterbridge\bin\matterbridge.js*') -or
+            $_.Name -eq 'ScreenControl.Host.exe'
         })
-        if ($runningMatterbridge.Count -eq 0) {
+        if ($runningScreenControlProcesses.Count -eq 0) {
             break
         }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $stopDeadline)
 
-    if ($runningMatterbridge.Count -gt 0) {
-        throw 'Matterbridge did not stop within 15 seconds.'
+    if ($runningScreenControlProcesses.Count -gt 0) {
+        throw 'The screen-control process tree did not stop within 15 seconds.'
     }
 
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
@@ -142,8 +145,9 @@ if ($PurgeMatterData) {
 }
 
 Remove-Item -LiteralPath $StatePath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $LauncherPath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $LauncherHostPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $LauncherExecutablePath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $LauncherScriptPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $LegacyLauncherHostPath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $LauncherLogPath -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $StateRoot) {
     $remainingState = Get-ChildItem -LiteralPath $StateRoot -Force -ErrorAction SilentlyContinue

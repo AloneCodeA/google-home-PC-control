@@ -9,3 +9,16 @@ artifacts/
 .matterbridge/
 .mattercert/
 
+# Editors / OS
+.vscode/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+
+# Logs / test output
+*.log
+TestResults/
+.DS_Store
+Thumbs.db
+

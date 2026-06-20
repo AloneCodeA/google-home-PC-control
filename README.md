@@ -1,61 +1,105 @@
 # Google Home Screen Control
 
-使用 Google Home Mini 透過本機 Matter 控制 Windows 11 電腦的所有螢幕：
+> Turn every monitor on your Windows 11 PC on and off by voice, through **Google Home Mini** over local **Matter** — while the computer keeps running.
 
-- `OK Google, turn off Computer Screen`
-- `OK Google, turn on Computer Screen`
-
-關閉螢幕時，Windows、網路及背景程式持續運作，不會睡眠、鎖定或登出。滑鼠與鍵盤仍可喚醒螢幕。
-
-## 運作範圍
-
-- 將全部螢幕視為一個名為 `Computer Screen` 的 Matter 開關。
-- 使用 Windows 顯示電源訊息，不依賴 DDC/CI，因此兩台 Dell 螢幕會一起控制。
-- Matterbridge 與 Windows 主機都在本機執行。
-- 不需要 VPS、Home Assistant、Google Cloud-to-cloud 或公開連入連接埠。
-- Google Home Mini 是 Matter Hub。Google 官方將 Google Home Mini 列為支援 Matter over Wi-Fi 的 Hub：
-  - [Prepare your smart home for Matter](https://support.google.com/googlenest/answer/12391458?hl=en)
-  - [Google Home supported Matter devices and hubs](https://developers.home.google.com/matter/supported-devices)
-
-Matter 首次加入 Google Fabric 時需要 Google Home App 完成安全配對。配對完成後，日常語音控制由 Home Mini 經區域網路直接完成，不需要持續使用 App。
-
-## 必要條件
-
-- Windows 11
-- Node.js 24.x
-- .NET 8 Desktop Runtime 或 SDK
-- `Ethernet` 網路介面已連線
-- Google Home Mini 與電腦位於同一個可傳遞 multicast/mDNS 的區域網路
-- 執行安裝時具有 Windows 系統管理員權限
-
-安裝程式會將 `Ethernet` 的 IPv6 綁定啟用，並將網路類別改成 `Private`。Matter 需要區域 IPv6；原始設定會記錄供解除安裝時復原。
-
-## 安裝
-
-在「以系統管理員身分執行」的 PowerShell 中執行：
-
-```powershell
-Set-Location 'C:\Users\Alone\Desktop\Blank\google-home-screen-control'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
-    -InterfaceAlias 'Ethernet' `
-    -Confirm:$false
+```text
+OK Google, turn off Computer Screen
+OK Google, turn on  Computer Screen
 ```
 
-安裝程式會：
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D6?logo=windows11&logoColor=white)
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-24.x-339933?logo=nodedotjs&logoColor=white)
+![Matter](https://img.shields.io/badge/Matter-local%20fabric-F38020)
 
-1. 驗證 Windows、Node.js、.NET 與網路介面。
-2. 保存目前 IPv6 與網路類別。
-3. 啟用 IPv6 並將網路設為 `Private`。
-4. 建立只限 `Private`/`LocalSubnet` 的 UDP 5353 與 5540 防火牆規則。
-5. 測試並發布 Windows 顯示控制主機。
-6. 建置及安裝 Matterbridge 3.9.0 與本專案外掛。
-7. 安裝會等待 `Ethernet` 與 IPv6 就緒的本機啟動器。
-8. 建立目前使用者登入後自動啟動的排程工作。
-9. 將螢幕關閉五秒再恢復，確認實際顯示控制可用。
+When you turn the screens off, Windows, the network, and background programs keep running — no sleep, no lock, no sign-out. Moving the mouse or pressing a key wakes the displays as usual.
 
-重複執行安裝時，腳本會先停止既有 Matterbridge 程序，再替換全域套件並重新啟動排程；第一次保存的網路設定不會被後續執行覆寫。若要更換網路介面，必須先解除安裝並復原原介面。
+Everything runs **on your own machine and LAN**. There is no cloud bridge, no VPS, no Home Assistant, and no inbound port opened to the internet.
 
-只檢查而不修改系統：
+---
+
+## Contents
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [First-time Matter pairing](#first-time-matter-pairing)
+- [Voice control](#voice-control)
+- [How it behaves](#how-it-behaves)
+- [Diagnostics](#diagnostics)
+- [Uninstall](#uninstall)
+- [Security](#security)
+- [Design notes](#design-notes)
+- [Project structure](#project-structure)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Features
+
+- **One voice switch for all displays.** Every connected monitor is exposed as a single Matter On/Off device named `Computer Screen`.
+- **The PC stays awake.** Only the display power signal is toggled — the machine never sleeps, locks, or logs out, so it stays reachable on the network.
+- **Driven by the real display state.** The actual Windows display state is written back to Matter, so a manual mouse/keyboard wake is reflected in Google Home.
+- **No DDC/CI dependency.** Uses Windows display-power messages, so multiple monitors (including two Dell panels on the dev machine) switch together reliably.
+- **Fully local.** Matter runs on your LAN via [Google Home Mini as a Matter hub](https://support.google.com/googlenest/answer/12391458?hl=en). After the one-time pairing, day-to-day commands never leave the network.
+- **Repeatable, auditable install.** A single PowerShell installer configures the build, firewall, IPv6, and a logon scheduled task — and saves the original network state so uninstall can restore it.
+
+## How it works
+
+```mermaid
+flowchart LR
+    Voice["Google Home Mini"] --> Hub["Google Home<br/>Matter Fabric"]
+    Hub -->|"Local IPv6 / Matter"| Bridge["Matterbridge 3.9.0<br/>(plugin)"]
+    Bridge -->|"JSON Lines over stdio"| Host["ScreenControl.Host.exe"]
+    Host -->|"Windows power messages"| Displays["All connected displays"]
+```
+
+- A **Matterbridge plugin** (TypeScript) publishes a standard On/Off Matter device to the Google Home fabric.
+- A dedicated **.NET 8 host** (`ScreenControl.Host.exe`) does the interactive Windows display work and reports the true display state back over a simple JSON-Lines protocol.
+- The plugin only updates Matter state **after** the host confirms the action. If the host stops unexpectedly, a supervisor rebuilds it and retries a command once — never in a loop.
+
+## Requirements
+
+- **Windows 11**
+- **Node.js 24.x**
+- **.NET 8 Desktop Runtime** (or SDK)
+- An **`Ethernet`** network interface that is connected
+- The Google Home Mini and the PC on the **same LAN** that passes multicast / mDNS
+- **Administrator** rights to run the installer
+
+> Matter requires link-local IPv6. The installer enables IPv6 on the chosen interface and sets its network category to `Private`. The original settings are saved so uninstall can restore them.
+
+## Installation
+
+1. **Get the code.** Download the latest source from the [Releases page](../../releases/latest) (or `git clone` this repository) and extract it.
+2. **Run the installer** from an **elevated** ("Run as administrator") PowerShell, in the repository folder:
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
+       -InterfaceAlias 'Ethernet' `
+       -Confirm:$false
+   ```
+
+   > If your wired adapter is not named `Ethernet`, pass its name to `-InterfaceAlias`. Check with `Get-NetAdapter`.
+
+The installer will:
+
+1. Validate Windows, Node.js, .NET, and the network interface.
+2. Save the current IPv6 binding and network category.
+3. Enable IPv6 and set the interface to `Private`.
+4. Create firewall rules limited to `Private` / `LocalSubnet` for UDP 5353 (mDNS) and 5540 (Matter).
+5. Build and publish the Windows display-control host.
+6. Build and install Matterbridge 3.9.0 and this plugin.
+7. Install a launcher that waits for the interface and IPv6 to be ready.
+8. Register a scheduled task that auto-starts after the current user signs in.
+9. Run a five-second display self-test to confirm real control works.
+
+Re-running the installer is safe: it stops the existing Matterbridge process tree, swaps the global package, and restarts the task. The network settings saved on the **first** run are never overwritten — to change interfaces, uninstall first.
+
+**Preview without changing anything:**
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
@@ -63,109 +107,55 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
     -InterfaceAlias 'Ethernet'
 ```
 
-如需跳過五秒螢幕測試，加入 `-SkipSelfTest`。
+Add `-SkipSelfTest` to skip the five-second screen test.
 
-## 首次 Matter 配對
+## First-time Matter pairing
 
-1. 確認排程工作 `Google Home Screen Control` 正在執行。
-2. 在此電腦開啟 [http://127.0.0.1:8283/](http://127.0.0.1:8283/)。
-3. Matterbridge 首頁會顯示 Matter QR code 與配對碼。
-4. 在 Google Home App 選擇新增 Matter 裝置並掃描 QR code。
-5. 將裝置加入 Home Mini 所在的同一個 Home，名稱保持為 `Computer Screen`。
+1. Confirm the scheduled task `Google Home Screen Control` is running.
+2. On this PC, open <http://127.0.0.1:8283/>.
+3. The Matterbridge home page shows a Matter QR code and pairing code.
+4. In the Google Home app, add a new Matter device and scan the QR code.
+5. Add it to the same Home as the Home Mini, keeping the name `Computer Screen`.
 
-這是一次性安全配對。重新登入或重新開機不需要再次配對；解除安裝預設也會保留 Matter 配對資料。
+This is a one-time secure commissioning. Signing in again or rebooting does **not** require re-pairing, and uninstall preserves the Matter pairing data by default.
 
-## 語音控制
+## Voice control
 
-配對後使用：
+After pairing:
 
 ```text
 OK Google, turn off Computer Screen
-OK Google, turn on Computer Screen
+OK Google, turn on  Computer Screen
 ```
 
-若要使用完全相同的自訂句子：
+Prefer your own phrasing? Create two Google Home Household Automations that map custom sentences (for example "turn off this computer screen") to `Computer Screen` Off/On. That only changes phrase parsing — the local control path is unchanged.
 
-```text
-OK Google, turn off this computer screen
-OK Google, turn on screen
-```
+## How it behaves
 
-可在 Google Home 建立兩個 Household Automation，分別把上述句子對應到 `Computer Screen` 的 Off 與 On。這只影響語句解析，不改變本機控制路徑。
+**Turning off** — The host broadcasts `SC_MONITORPOWER = 2` so all displays stop their signal. The computer stays awake and Matterbridge keeps running.
 
-## 系統行為
+**Turning on** — The host broadcasts `SC_MONITORPOWER = -1` plus a momentary display-required signal. If Windows still reports the screen off after two seconds, it performs a single one-pixel mouse nudge (then returns the cursor) as a fallback wake.
 
-### 關閉
+**Manual wake** — Mouse or keyboard wakes the screens normally; the real Windows display state is written back to the Matter `OnOff` attribute.
 
-Windows 主機廣播 `SC_MONITORPOWER = 2`，讓所有螢幕停止顯示訊號。電腦保持喚醒，Matterbridge 與網路繼續運作。
+**Login session** — Display control needs an interactive Windows session, so the task starts after the current user signs in (control is not available while signed out). On logon or power-state resume, `Start-Matterbridge.ps1` waits for the interface to be `Up` with a preferred IPv6 address, then clears only the safe-to-rebuild Matter session/subscription caches — the Google Home fabric, commissioning, and access-control data are preserved. Node and the host run inside a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Windows Job Object so nothing is orphaned if the task stops.
 
-### 開啟
+## Diagnostics
 
-Windows 主機廣播 `SC_MONITORPOWER = -1` 並送出暫時的 display-required 訊號。若兩秒後 Windows 仍回報螢幕關閉，才使用一次一像素滑鼠移動再移回原位作為後備喚醒。
-
-### 手動喚醒
-
-滑鼠或鍵盤可正常喚醒螢幕。Windows 的實際顯示狀態會回寫到 Matter `OnOff` 屬性。
-
-### 登入工作階段
-
-顯示控制需要互動式 Windows 工作階段。排程工作在目前使用者登入後啟動；登出後無法控制該桌面的螢幕。
-
-登入或從 Windows 電源狀態恢復時，`Start-Matterbridge.ps1` 先等待 `Ethernet` 為 Up、IPv6 已啟用且已有 Preferred IPv6 位址。它只清除可安全重建的 Matter session resumption 與 subscription cache，Google Home fabric、裝置配對及存取控制資料都會保留。Node 與 Windows Host 會被放入 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Windows Job Object，確保排程停止或異常終止時不留下孤立程序。
-
-## 架構
-
-```mermaid
-flowchart LR
-    Voice["Google Home Mini"] --> Hub["Google Home Matter Fabric"]
-    Hub -->|"Local IPv6 / Matter"| Bridge["Matterbridge 3.9.0"]
-    Bridge -->|"JSON Lines over stdio"| Host["ScreenControl.Host.exe"]
-    Host -->|"Windows power messages"| Displays["All connected displays"]
-```
-
-- `plugin/`：Matterbridge DynamicPlatform，公開 On/Off Plug-In Unit。
-- `src/ScreenControl.Host/`：Windows 顯示控制、喚醒鎖與狀態監聽。
-- `Start-Matterbridge.ps1`：等待網路就緒、移除重啟敏感 session cache 並啟動 Matterbridge。
-- `Install.ps1`：可重跑的建置、網路、防火牆及排程安裝。
-- `Uninstall.ps1`：解除安裝並復原已保存的網路設定。
-- `Test-All.ps1`：完整自動驗證入口。
-
-Matterbridge 外掛只有在 Windows 主機成功回覆後才更新 Matter 狀態。主機意外中止時，監督器會重建程序並只重試命令一次，避免無限重送。
-
-## 驗證
-
-執行完整測試：
+Check the scheduled task:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Test-All.ps1
+Get-ScheduledTask -TaskName 'Google Home Screen Control' | Select-Object TaskName, State
 ```
 
-驗證內容包括：
-
-- 28 個 .NET 單元與程序整合測試。
-- 16 個 TypeScript 單元與子程序整合測試。
-- TypeScript strict typecheck 與正式建置。
-- npm 發布套件內容乾跑。
-- 5 個 PowerShell 安裝、啟動器、Job Object 及解除安裝驗證測試。
-- 所有 PowerShell 檔案語法解析。
-
-## 診斷
-
-查看排程狀態：
+Restart the background service:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Google Home Screen Control' |
-    Select-Object TaskName, State
-```
-
-重新啟動背景服務：
-
-```powershell
-Stop-ScheduledTask -TaskName 'Google Home Screen Control' -ErrorAction SilentlyContinue
+Stop-ScheduledTask  -TaskName 'Google Home Screen Control' -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName 'Google Home Screen Control'
 ```
 
-查看 Matterbridge 外掛與日誌：
+Inspect the plugin and logs:
 
 ```powershell
 matterbridge.cmd --list
@@ -173,15 +163,15 @@ Get-Content "$HOME\.matterbridge\matterbridge.log" -Tail 100
 Get-Content "$env:LOCALAPPDATA\GoogleHomeScreenControl\launcher.log" -Tail 100
 ```
 
-檢查 Matter 所需的網路狀態：
+Verify the network state Matter needs:
 
 ```powershell
-Get-NetAdapterBinding -Name 'Ethernet' -ComponentID ms_tcpip6
+Get-NetAdapterBinding   -Name 'Ethernet' -ComponentID ms_tcpip6
 Get-NetConnectionProfile -InterfaceAlias 'Ethernet'
-Get-NetIPAddress -InterfaceAlias 'Ethernet' -AddressFamily IPv6
+Get-NetIPAddress         -InterfaceAlias 'Ethernet' -AddressFamily IPv6
 ```
 
-手動執行五秒顯示測試：
+Run the five-second display test manually:
 
 ```powershell
 $hostPath = Join-Path (npm.cmd root --global) `
@@ -189,162 +179,67 @@ $hostPath = Join-Path (npm.cmd root --global) `
 & $hostPath --self-test
 ```
 
-## 解除安裝
+### Troubleshooting
 
-預設移除服務、外掛與防火牆規則，復原安裝前的 IPv6/網路類別，並保留 Matter 配對資料：
+- **Google can't find the device during pairing** — confirm the PC and Home Mini are on the same subnet, IPv6 is enabled on the interface, and the network category is `Private`. Re-run `Install.ps1 -ValidateOnly` to see the current state.
+- **Device shows offline after a reboot** — the launcher waits for a preferred IPv6 address; give it a moment after sign-in, then check `launcher.log`.
+- **Wrong adapter** — if your wired NIC isn't `Ethernet`, reinstall with the correct `-InterfaceAlias`.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 `
-    -Confirm:$false
-```
+## Uninstall
 
-只查看解除安裝計畫：
-
-```powershell
-.\Uninstall.ps1 -ValidateOnly
-```
-
-不復原網路設定：
+Remove the service, plugin, and firewall rules, restore the pre-install IPv6 / network category, and keep the Matter pairing data:
 
 ```powershell
-.\Uninstall.ps1 -RestoreNetwork:$false -Confirm:$false
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -Confirm:$false
 ```
 
-同時刪除 Matterbridge 的全部本機配對資料：
+Other options:
 
 ```powershell
-.\Uninstall.ps1 -PurgeMatterData -Confirm:$false
+.\Uninstall.ps1 -ValidateOnly                 # show the uninstall plan only
+.\Uninstall.ps1 -RestoreNetwork:$false -Confirm:$false   # leave network settings as-is
+.\Uninstall.ps1 -PurgeMatterData -Confirm:$false         # also delete all local Matter pairing data
 ```
 
-`-PurgeMatterData` 會影響同一個 Windows 使用者下的其他 Matterbridge 配對，除非確定不再使用，否則不要指定。
+> `-PurgeMatterData` affects **every** Matterbridge pairing for the current Windows user. Use it only if you are sure none are still in use.
 
-## 安全性
+## Security
 
-- 管理前端只綁定 `127.0.0.1:8283`，區域網路其他裝置不能直接開啟。
-- 防火牆只允許 Node.js 在 `Private` 網路接受 `LocalSubnet` 的 UDP 5353/5540。
-- 不建立公網入口，不保存 Google 密碼或 OAuth token。
-- Matter 配對金鑰由 Matterbridge 儲存在目前使用者的 `$HOME\.matterbridge` 與 `$HOME\.mattercert`。
+- The admin front end binds to `127.0.0.1:8283` only — other LAN devices cannot open it.
+- Firewall rules allow only Node.js to accept `LocalSubnet` UDP 5353/5540 on `Private` networks.
+- No public ingress is created, and no Google password or OAuth token is stored.
+- Matter pairing keys live in the current user's `$HOME\.matterbridge` and `$HOME\.mattercert`.
 
-## What Was Wrong
+## Design notes
 
-- Google Home Mini 不能直接呼叫 Windows 命令或任意本機 HTTP endpoint。
-- 單純關閉螢幕可能讓 Windows 之後睡眠，導致無法從網路重新喚醒顯示。
-- 沒有保存網路原始狀態的安裝流程會使解除安裝無法可靠復原。
-- Windows 恢復時載入舊 Matter session cache，可能先嘗試不可達的舊 IPv6 peer，造成 Google Home 暫時離線。
+A few decisions that shape the implementation:
 
-## Why It Was Bad
+- **Local Matter instead of a cloud webhook.** A cloud bridge or VPS would add public attack surface, account coupling, and ongoing upkeep for a one-machine convenience. Home Mini already speaks Matter on the LAN, so the screens are modeled as a standard On/Off device.
+- **Keep awake, switch only the display signal.** Letting Windows sleep can make it impossible to wake the display from the network. The system stays awake and only toggles monitor power.
+- **Trust the OS, not the command.** Treating a command as the source of truth reports the wrong state after a manual wake, so the host monitors the real display state and reports it back. `GUID_CONSOLE_DISPLAY_STATE` is *not* used to gate the wake fallback because it can stay `true` after a monitor is off.
+- **One ownership boundary.** Command execution stays in the plugin; the Matter attribute transition is owned by Matterbridge's OnOff behavior. The plugin does not write the command-owned attribute itself, which previously caused commands to fail after Windows had already acted.
+- **A windowless launcher owns the process tree.** A .NET 8 `WinExe` launcher runs as the interactive scheduled task (no console window) and assigns PowerShell → Node → Matterbridge → host to a kill-on-close Job Object, giving Task Scheduler deterministic ownership for restart and cleanup.
+- **Wait for IPv6, drop only session cache.** On resume, starting Matterbridge before IPv6 is ready — or loading a stale Matter session cache — can make Google Home briefly unreachable. The launcher waits for a preferred IPv6 address and clears only session/subscription caches, never the fabric or credentials.
 
-- 雲端 webhook 或 VPS 會增加公開攻擊面、帳戶整合與持續維運成本。
-- 將畫面狀態視為命令結果而不監聽 Windows，會在滑鼠喚醒後回報錯誤狀態。
-- 缺少重試上限與命令序列化可能造成程序重啟迴圈或顯示狀態競爭。
+## Project structure
 
-## What To Avoid Next Time
+```text
+.
+├── Install.ps1               # Repeatable build / network / firewall / scheduled-task install
+├── Uninstall.ps1             # Uninstall and restore saved network settings
+├── Start-Matterbridge.ps1    # Wait for network readiness, prune session cache, start Matterbridge
+├── GoogleHomeScreenControl.sln
+├── plugin/                   # Matterbridge DynamicPlatform plugin (On/Off Plug-In Unit)
+│   └── src/
+└── src/
+    ├── ScreenControl.Host/       # Windows display control, wake lock, state monitor
+    └── ScreenControl.Launcher/   # WinExe launcher owning the kill-on-close Job Object
+```
 
-- 不要用關閉輸出訊號取代睡眠，或反過來把睡眠當成關閉螢幕。
-- 不要將 Matter 管理前端暴露到 LAN 或 Internet。
-- 不要刪除 `$HOME\.matterbridge`，除非確定要移除全部 Matter 配對。
-- 不要刪除 Matter fabric 或 operational credential；重啟恢復只需移除 session/subscription cache。
-- 不要繞過完整測試直接發布主機或外掛套件。
+## Contributing
 
-## Correct Approach
-
-- 使用 Home Mini 支援的區域 Matter Fabric，將 Windows 顯示抽象成一個標準 On/Off 裝置。
-- 讓 Matterbridge 負責 Matter 協定，專用 .NET 主機負責互動式 Windows API。
-- 持續保持系統喚醒，只切換顯示電源訊號，並監聽實際顯示狀態。
-- 在啟動 Matterbridge 前等待 IPv6 就緒，並重建可安全丟棄的 session/subscription 狀態。
-- 將網路、防火牆、排程與原始設定復原納入同一套可驗證安裝流程。
-
-## Background Startup Audit
-
-### What Was Wrong
-
-- The interactive logon task launched a console-subsystem process directly.
-- Matterbridge therefore opened a persistent console window after every sign-in.
-- A temporary VBS wrapper hid the window but detached the service child tree from Task Scheduler stop control.
-
-### Why It Was Bad
-
-- A long-running background integration should not require a visible terminal.
-- Switching the task to a non-interactive session would hide the window but break ownership of interactive display control.
-- A launcher that outlives Task Scheduler ownership prevents reliable restart, update, and failure recovery.
-
-### What To Avoid Next Time
-
-- Do not register `node.exe`, `cmd.exe`, or another console executable directly as an interactive long-running task action.
-- Do not use `WScript.Shell.Run` to detach the service process from Task Scheduler, because failure detection and restart behavior become inaccurate.
-
-### Correct Approach
-
-- Run `powershell.exe -WindowStyle Hidden` directly as the interactive Task Scheduler action.
-- Assign Node to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job and keep PowerShell waiting for its exit code, so stopping the task terminates the entire process tree.
-- Remove only restart-sensitive Matter session caches; preserve fabric and commissioning records.
-
-## Command Reliability and Hidden Window Audit
-
-### Changed
-
-- Matter command handlers now execute only the Windows action; Matterbridge's `OnOffServer` owns the command attribute transition.
-- Display-on commands always send the no-net-movement input wake fallback after the monitor-power and display-required signals.
-- A blocked synthetic-input fallback no longer changes a successful primary wake request into a failed Matter command.
-- Display-state events received during an active OnOff command update cached state without opening a competing Matter attribute transaction.
-- The launcher creates Node with `-WindowStyle Hidden` while retaining Job Object process-tree ownership.
-
-### Why
-
-- Matterbridge calls the plugin handler before `OnOffServer.on()` or `OnOffServer.off()` updates the cluster attribute. Writing the same attribute inside the handler duplicates ownership and can fail the Matter command after Windows already performed the action.
-- `GUID_CONSOLE_DISPLAY_STATE` can remain `true` after `SC_MONITORPOWER` turns a monitor off. It is not reliable evidence that the physical display is awake.
-- Windows can reject `SendInput` across an integrity or desktop boundary even after the primary monitor wake signals succeeded.
-- The Host can publish a display-state event before its correlated command result, so immediate event synchronization can contend with the command's Matter transaction.
-- `-NoNewWindow` inherits the task launcher's console. A hidden child window prevents Matterbridge output from becoming visible without detaching the process tree.
-
-### Previous Problems
-
-- Google could report "Sorry, something went wrong" even though the screen-off action had already run.
-- A stale display-state value skipped the only input-based wake fallback.
-- A blocked best-effort input fallback caused Host to return `success:false`, so Google announced a command failure after the primary wake request.
-- A display-state callback opened `setAttribute` while the OnOff command still owned the endpoint transaction, leaving Matterbridge waiting and Google timing out.
-- The interactive scheduled task could expose the Matterbridge console window.
-
-### What Was Wrong
-
-- The plugin changed an attribute that Matterbridge's OnOff behavior changes after the plugin handler returns.
-- The wake fallback depended on a power notification that did not track the monitor power command reliably.
-- The Node child inherited a console instead of being created with a hidden window.
-
-### Why It Was Bad
-
-- Split state ownership allowed command completion and the real Windows action to disagree.
-- A false-positive `true` display state made the on command report success without using its strongest fallback.
-- A visible console is disruptive and can be closed accidentally, terminating local Matter control.
-
-### Avoid Next Time
-
-- Do not update command-owned Matter attributes inside handlers when the Matterbridge behavior already performs that transition.
-- Do not use `GUID_CONSOLE_DISPLAY_STATE` as the gate for a harmless wake fallback.
-- Do not treat a blocked synthetic input fallback as failure of already successful primary wake signals.
-- Do not start an independent Matter attribute transaction from a state callback while a command transaction is active.
-- Do not use `-NoNewWindow` for an interactive background task that must remain invisible.
-
-### What To Avoid Next Time
-
-- Do not duplicate framework-owned state transitions.
-- Do not make physical wake reliability depend on a single advisory state source.
-- Do not hide a process by detaching it from Task Scheduler ownership.
-
-### Correct Direction
-
-- Keep command execution in the plugin, Matter state transitions in Matterbridge, and external Windows state synchronization in the display-state event path.
-- Use layered, idempotent wake signals with a zero-net-movement input fallback.
-- Keep injected input best-effort because UIPI and desktop isolation can reject it.
-- Suppress callback-driven attribute writes during commands and let `MatterbridgeOnOffServer` complete the command-owned state transition.
-- Keep the hidden PowerShell -> Node -> Host tree inside the kill-on-close Job Object.
-
-### Correct Approach
-
-- Let `MatterbridgeOnOffServer` update `onOff` after the host command succeeds.
-- Always execute `SendWakeInput()` after the two-second wake confirmation delay.
-- Start Node with `-WindowStyle Hidden -PassThru`, assign it to the Job Object, and wait for its exit.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and build/type-check commands.
 
 ## License
 
-MIT
+[MIT](LICENSE) © Alone

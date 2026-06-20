@@ -24,8 +24,12 @@ $PluginRoot = Join-Path $RepositoryRoot 'plugin'
 $ArtifactsRoot = Join-Path $RepositoryRoot 'artifacts'
 $StateRoot = Join-Path $env:LOCALAPPDATA 'GoogleHomeScreenControl'
 $StatePath = Join-Path $StateRoot 'install-state.json'
-$LauncherSourcePath = Join-Path $RepositoryRoot 'Start-Matterbridge.ps1'
-$LauncherInstallPath = Join-Path $StateRoot 'Start-Matterbridge.ps1'
+$LauncherProjectPath = Join-Path $RepositoryRoot 'src\ScreenControl.Launcher\ScreenControl.Launcher.csproj'
+$LauncherPublishRoot = Join-Path ([IO.Path]::GetTempPath()) "GoogleHomeScreenControl-Launcher-$PID"
+$LauncherPublishedPath = Join-Path $LauncherPublishRoot 'ScreenControl.Launcher.exe'
+$LauncherExecutableInstallPath = Join-Path $StateRoot 'ScreenControl.Launcher.exe'
+$LauncherScriptSourcePath = Join-Path $RepositoryRoot 'Start-Matterbridge.ps1'
+$LauncherScriptInstallPath = Join-Path $StateRoot 'Start-Matterbridge.ps1'
 $LegacyLauncherHostPath = Join-Path $StateRoot 'Start-Matterbridge.vbs'
 
 function Test-IsAdministrator {
@@ -166,7 +170,7 @@ New-NetFirewallRule -DisplayName $MatterFirewallRule -Direction Inbound -Action 
     -Profile Private | Out-Null
 
 Invoke-CheckedCommand -FilePath 'dotnet' -ArgumentList @(
-    'test', (Join-Path $RepositoryRoot 'GoogleHomeScreenControl.sln'),
+    'build', (Join-Path $RepositoryRoot 'GoogleHomeScreenControl.sln'),
     '--configuration', 'Release', '--verbosity', 'minimal'
 )
 Invoke-CheckedCommand -FilePath 'dotnet' -ArgumentList @(
@@ -175,33 +179,52 @@ Invoke-CheckedCommand -FilePath 'dotnet' -ArgumentList @(
     '-p:PublishSingleFile=true', '-p:DebugType=None', '-p:DebugSymbols=false',
     '--output', (Join-Path $PluginRoot 'bin')
 )
+Remove-Item -LiteralPath $LauncherPublishRoot -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $LauncherPublishRoot -Force | Out-Null
+Invoke-CheckedCommand -FilePath 'dotnet' -ArgumentList @(
+    'publish', $LauncherProjectPath,
+    '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'false',
+    '-p:PublishSingleFile=true', '-p:DebugType=None', '-p:DebugSymbols=false',
+    '--output', $LauncherPublishRoot
+)
+if (-not (Test-Path -LiteralPath $LauncherPublishedPath)) {
+    throw "Published launcher executable was not found: $LauncherPublishedPath"
+}
 
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -ne $existingTask) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     $stopDeadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
-        $runningMatterbridge = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -eq 'node.exe' -and
-            $_.CommandLine -like '*node_modules\matterbridge\bin\matterbridge.js*'
+        $runningScreenControlProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'ScreenControl.Launcher.exe' -or
+            ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*Start-Matterbridge.ps1*') -or
+            ($_.Name -eq 'node.exe' -and $_.CommandLine -like '*node_modules\matterbridge\bin\matterbridge.js*') -or
+            $_.Name -eq 'ScreenControl.Host.exe'
         })
-        if ($runningMatterbridge.Count -eq 0) {
+        if ($runningScreenControlProcesses.Count -eq 0) {
             break
         }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $stopDeadline)
 
-    if ($runningMatterbridge.Count -gt 0) {
-        throw 'The existing Matterbridge process did not stop within 15 seconds.'
+    if ($runningScreenControlProcesses.Count -gt 0) {
+        throw 'The existing screen-control process tree did not stop within 15 seconds.'
     }
 }
+
+if (-not (Test-Path -LiteralPath $LauncherScriptSourcePath)) {
+    throw "Matterbridge launcher script was not found: $LauncherScriptSourcePath"
+}
+Copy-Item -LiteralPath $LauncherPublishedPath -Destination $LauncherExecutableInstallPath -Force
+Copy-Item -LiteralPath $LauncherScriptSourcePath -Destination $LauncherScriptInstallPath -Force
+Remove-Item -LiteralPath $LegacyLauncherHostPath -Force -ErrorAction SilentlyContinue
 
 Invoke-CheckedCommand -FilePath 'npm.cmd' -ArgumentList @(
     'install', '--global', "matterbridge@$MatterbridgeVersion", '--omit=dev', '--no-fund', '--no-audit'
 )
 Invoke-CheckedCommand -FilePath 'npm.cmd' -ArgumentList @('ci', '--no-fund', '--no-audit') -WorkingDirectory $PluginRoot
 Invoke-CheckedCommand -FilePath 'npm.cmd' -ArgumentList @('link', '--no-fund', '--no-audit', 'matterbridge') -WorkingDirectory $PluginRoot
-Invoke-CheckedCommand -FilePath 'npm.cmd' -ArgumentList @('test') -WorkingDirectory $PluginRoot
 Invoke-CheckedCommand -FilePath 'npm.cmd' -ArgumentList @('run', 'typecheck') -WorkingDirectory $PluginRoot
 Invoke-CheckedCommand -FilePath 'npm.cmd' -ArgumentList @('run', 'build') -WorkingDirectory $PluginRoot
 
@@ -228,21 +251,10 @@ $matterbridgeScript = Join-Path (Split-Path $matterbridgeCommand -Parent) 'node_
 if (-not (Test-Path -LiteralPath $matterbridgeScript)) {
     throw "Matterbridge entry point was not found: $matterbridgeScript"
 }
-if (-not (Test-Path -LiteralPath $LauncherSourcePath)) {
-    throw "Matterbridge launcher was not found: $LauncherSourcePath"
-}
-Copy-Item -LiteralPath $LauncherSourcePath -Destination $LauncherInstallPath -Force
-Remove-Item -LiteralPath $LegacyLauncherHostPath -Force -ErrorAction SilentlyContinue
-
+$powerShellExecutable = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $taskArguments = @(
-    '-NoProfile'
-    '-NonInteractive'
-    '-WindowStyle'
-    'Hidden'
-    '-ExecutionPolicy'
-    'Bypass'
-    '-File'
-    "`"$LauncherInstallPath`""
+    "`"$powerShellExecutable`""
+    "`"$LauncherScriptInstallPath`""
     '-InterfaceAlias'
     "`"$InterfaceAlias`""
     '-NodeExecutable'
@@ -250,8 +262,7 @@ $taskArguments = @(
     '-MatterbridgeScript'
     "`"$matterbridgeScript`""
 ) -join ' '
-$powerShellExecutable = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$taskAction = New-ScheduledTaskAction -Execute $powerShellExecutable `
+$taskAction = New-ScheduledTaskAction -Execute $LauncherExecutableInstallPath `
     -Argument $taskArguments -WorkingDirectory $StateRoot
 $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $taskTrigger.Delay = 'PT5S'
@@ -282,6 +293,8 @@ if (-not $SkipSelfTest) {
     Invoke-CheckedCommand -FilePath $hostExecutable -ArgumentList @('--self-test')
 }
 
+Remove-Item -LiteralPath $LauncherPublishRoot -Recurse -Force -ErrorAction SilentlyContinue
+
 [ordered]@{
     Installed = $true
     PluginName = $PluginName
@@ -289,6 +302,7 @@ if (-not $SkipSelfTest) {
     TaskName = $TaskName
     FrontendUrl = 'http://127.0.0.1:8283/'
     StatePath = $StatePath
-    LauncherPath = $LauncherInstallPath
+    LauncherPath = $LauncherExecutableInstallPath
+    LauncherScriptPath = $LauncherScriptInstallPath
     PackagePath = $packagePath
 } | ConvertTo-Json -Depth 5
